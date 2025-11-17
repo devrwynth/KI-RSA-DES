@@ -1,5 +1,6 @@
 import socket
 import DES
+import RSA
 import threading
 import sys
 
@@ -12,13 +13,15 @@ TARGET_CLIENT = input('target client name: ')
 target_public_key = None
 
 #generate private and public RSA keys
-publickey = input("public key: ") # placeholder
+RSA_e, RSA_d, RSA_n = RSA.generateKeys()
+publickey = (RSA_e,RSA_n)
+privatekey = (RSA_d,RSA_n)
 
 # register public key to PKA
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((PUBLIC_KEY_AUTHORITY_IP, PKA_PORT))
 
-    s.sendall(f'new,{CLIENT_NAME},{publickey}'.encode('utf-8'))
+    s.sendall(f'new,{CLIENT_NAME},{publickey[0]},{publickey[1]}'.encode('utf-8'))
 
     data = s.recv(1024)
     reply = data.decode('utf-8')
@@ -32,13 +35,14 @@ while try_again:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((PUBLIC_KEY_AUTHORITY_IP, PKA_PORT))
 
-        s.sendall(f'request,{TARGET_CLIENT},{publickey}'.encode('utf-8'))
+        s.sendall(f'request,{TARGET_CLIENT},{publickey[0]},{publickey[1]}'.encode('utf-8'))
 
         data = s.recv(1024)
         reply = data.decode('utf-8')
         
     if (reply != "not registered"):
-        target_public_key = reply
+        t_e, t_n = reply.split(',')
+        target_public_key = (int(t_e),int(t_n))
         try_again = False
     else:
         try_again_prompt = input("Target public key not registered, Try again? (Y/N): ")
@@ -106,12 +110,17 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             
         original_key_hex = key_bytes.hex().upper()
         generated_DES_Key = original_key_hex
+        
 
         DES_key = generated_DES_Key
         DES_rkb = DES.generate_keys(DES_key)
-        DES_key_encrypted = DES_key # placeholder RSA encryption
+        print(f"DES key: {DES_key}")
+        key_int_rsa = RSA.hex_to_int(original_key_hex)
+        cipher_key_rsa = RSA.encrypt(key_int_rsa, target_public_key[0], target_public_key[1])
+        DES_key_encrypted = cipher_key_rsa 
         #send DES key to server and so the other client
-        s.sendall(DES_key_encrypted.encode('utf-8'))
+        
+        s.sendall(f"{DES_key_encrypted}".encode('utf-8'))
         print("Chatting start")
         receive_thread = threading.Thread(target=receive_messages, args=(s,))
         receive_thread.start()
@@ -127,11 +136,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         print("Awaiting other client...")
         while True:
             try:
-                #recieve DES key (placeholder)
-                mes = s.recv(1024).decode('utf-8')
+                #recieve DES key 
+                mes = s.recv(4096).decode('utf-8')
+                print(f"Received: {mes}")
                 if not mes:
                     continue
-                DES_key = mes#[:4] # placeholder RSA decryption
+                decrypted_key_int = RSA.decrypt(int(mes), RSA_d, RSA_n)
+                DES_key = RSA.int_to_hex(decrypted_key_int)
+                print(decrypted_key_int)
                 DES_rkb = DES.generate_keys(DES_key)
 
                 print(f"Received Decrypted DES KEY: {DES_key}")
